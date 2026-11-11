@@ -157,6 +157,7 @@ function selectAgent(id) {
   state.agent = id;
   renderAgents();
   $('#prompt').placeholder = `Reply to ${AGENT_LABEL[id] || id}…`;
+  $('#model-sub').textContent = `(${AGENT_LABEL[id] || id})`;
   if (!ready(id)) statusError(`${AGENT_LABEL[id] || id} is not installed`);
 }
 
@@ -410,44 +411,55 @@ function streamBubble(agent) {
   let textEl = null;
 
   const newText = () => {
-    textEl = document.createElement('div');
-    textEl.className = 'text cursor';
-    answer.appendChild(textEl);
+    textEl = null;
     buffer = '';
     return textEl;
   };
-  newText();
+
+  /** The text row appears only once something is actually streamed. */
+  const ensureText = () => {
+    if (!textEl) {
+      textEl = document.createElement('div');
+      textEl.className = 'text cursor';
+      answer.appendChild(textEl);
+    }
+    return textEl;
+  };
+
+  const closeText = () => {
+    if (textEl) textEl.classList.remove('cursor');
+  };
 
   return {
     push(chunk) {
       chunk = String(chunk);
       if (buffer && !buffer.endsWith('\n') && !chunk.startsWith('\n')) chunk = '\n\n' + chunk;
       buffer += chunk;
-      textEl.innerHTML = md(buffer);
+      ensureText().innerHTML = md(buffer);
       scrollDown();
     },
     think(text) {
-      textEl.classList.remove('cursor');
-      const t = thinkBlock(text, false);
-      answer.appendChild(t);
+      closeText();
+      answer.appendChild(thinkBlock(text, false));
       newText();
       scrollDown();
     },
     tool(name, input) {
-      textEl.classList.remove('cursor');
+      closeText();
       answer.appendChild(toolBlock(name, input));
       newText();
       scrollDown();
     },
     end(err) {
       working.remove();
-      textEl.classList.remove('cursor');
+      closeText();
       if (err && !buffer.trim()) {
-        textEl.innerHTML = `<span style="color:var(--danger)">${esc(err)}</span>`;
+        ensureText().innerHTML = `<span style="color:var(--danger)">${esc(err)}</span>`;
       }
       if (!answer.textContent.trim()) {
-        textEl.innerHTML = '<span style="color:var(--faint)">(no output)</span>';
+        ensureText().innerHTML = '<span style="color:var(--faint)">(no output)</span>';
       }
+      closeText();
       scrollDown();
     },
   };

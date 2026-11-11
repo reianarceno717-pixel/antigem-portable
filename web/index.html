@@ -70,18 +70,16 @@
 
       <div id="chips" class="chips">
         <button class="chip on" title="Agents may use tools without asking"><span class="ci">✦</span> Auto</button>
-        <button class="chip" title="Engine default reasoning effort"><span class="ci">✎</span> Effort · Default (Medium)</button>
+        <button class="chip" title="Whatever reasoning effort the engine picks"><span class="ci">✎</span> Effort · Engine default</button>
         <button class="chip warm" title="The agent reasons before it answers"><span class="ci">☼</span> Thinking</button>
-        <button class="chip cool" title="Prompt cache lifetime reported by the engine"><span class="ci">◔</span> Cache 61m</button>
       </div>
 
       <div id="composer" class="composer">
         <textarea id="prompt" rows="1" placeholder="Reply to Claude…"></textarea>
         <div class="composer-row">
           <button id="plus" class="plus" title="More">＋</button>
-          <button id="model-chip" class="model-chip">
-            <span class="spark">✦</span> Default <span class="model-sub">(Sonnet 5.5)</span>
-            <b class="quota">90%</b>
+          <button id="model-chip" class="model-chip" title="The model this engine uses by default">
+            <span class="spark">✦</span> Default <span class="model-sub" id="model-sub">(Claude Code)</span>
             <span class="caret">▾</span>
           </button>
           <div class="spacer"></div>

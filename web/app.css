@@ -659,14 +659,6 @@ body.nav-open #scrim { opacity: 1; pointer-events: auto; }
 .model-chip .spark { color: var(--primary); font-size: 12px; }
 .model-chip .model-sub { color: var(--muted); font-size: 13px; }
 .model-chip .caret { color: var(--muted); font-size: 10px; }
-.model-chip .quota {
-  background: rgba(74, 222, 128, .16);
-  color: var(--success);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 6px;
-  border-radius: 7px;
-}
 
 .send {
   width: 44px; height: 44px;
@@ -825,7 +817,7 @@ body.nav-open #scrim { opacity: 1; pointer-events: auto; }
   .chips { padding: 6px 12px 0; }
   .chip { height: 34px; padding: 0 12px; font-size: 13px; }
   .composer { padding: 8px 12px 12px; }
-  .model-chip .model-sub { display: none; }
+  .model-chip .model-sub { font-size: 12px; }
   .empty h1 { font-size: 23px; }
 }
 
