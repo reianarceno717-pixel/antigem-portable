@@ -11,13 +11,15 @@ Linux · macOS · Windows · Termux. USB-stick friendly.
 
 ## What this actually is (and is not)
 
-AntiGem itself is a Kotlin/Compose Android app. The app can't be extracted from an APK into a
-portable folder — but the part it drives can. This project packages **the agent half**:
+AntiGem itself is a Kotlin/Compose Android app, so the compiled UI can't move into a folder. This
+project packages **the agent half**, and rebuilds the missing face as a local web app that the
+portable serves itself — the same shape DeepSeek Harness uses, which is why it works on a phone and
+on a laptop without changing anything.
 
 | AntiGem layer | Portable equivalent |
 |---|---|
-| Go bridge + Kotlin UI | `scripts/portable.sh` menu + `scripts/portable.ps1` |
-| Termux terminal | `--exec` / menu option 3, isolated `HOME` + `TMPDIR` |
+| Go bridge + Kotlin UI | `web/` face served by `scripts/serve.py` (chat · terminal · files) |
+| Terminal | `--exec` / menu 3 / the **Terminal** tab, isolated `HOME` + `TMPDIR` |
 | `claude` / `codex` / `agy` / `opencode` CLIs | auto-detected, launched with the portable home |
 | Credentials in `~` | `data/home` (copied, never moved) |
 | MCP extensions (`127.0.0.1:8865`) | left with the app — `--import --with-mcp` copies the config |
@@ -28,14 +30,17 @@ on Termux a glibc `opencode` binary is detected and rejected instead of failing 
 
 ## Preview
 
-Terminal view (rendered from the live run on this phone; a laptop shows the same layout
-with `linux-x64` / glibc / portable node `v22.14.0`):
+The web face, running on this phone — real `codex` turns, real tool calls, real files:
 
-![terminal preview](docs/preview-terminal.png)
+![chat](docs/face-chat.png)
 
-And the same folder running inside a real Xfce desktop at 1600×1000, on the phone itself:
+The same folder inside a real Xfce desktop at 1600×1000, also on the phone:
 
 ![xfce preview](docs/preview-xfce-desktop.png)
+
+And the menu when you don't want a browser:
+
+![terminal preview](docs/preview-terminal.png)
 
 ## Quick start
 
@@ -55,8 +60,41 @@ when the host has none.
 ```
 1) Workspace — start an agent       4) Import host credentials
 2) Doctor    — environment report   5) Update portable Node
-3) Terminal  — portable shell       6) Quit
+3) Terminal  — portable shell       6) Web face — open in a browser
+                                    7) Quit
 ```
+
+## The web face
+
+The menu is the engine. The face is a local web app the portable serves itself — the same
+trick DeepSeek Harness uses, which is why it survives the move from phone to laptop.
+
+```sh
+./linux.sh --serve          # http://127.0.0.1:8787
+./linux.sh --serve 9000     # pick a port
+```
+
+Everything runs from the portable folder: the same isolated `HOME`, the same workspace, the same
+engines. No npm, no pip, no build step — `python3` plus the browser you already have.
+
+| Tab | What it does |
+|---|---|
+| **Chat** | streaming replies, inline tool cards with the command and its exit code, markdown, one session per conversation (saved in `data/sessions/`) |
+| **Terminal** | real commands in the portable environment, with scrollback that survives a reload |
+| **Files** | browse the workspace, open and edit files, save with `Ctrl-S` |
+
+![terminal](docs/face-terminal.png)
+
+Sidebar: sessions, engine states, agent picker, and a status pill that counts the run.
+`claude`, `agy` and `codex` stream structured JSON, so tool calls render as cards instead of a wall
+of text. `opencode` runs through the glibc sandbox when the host needs one.
+
+![files](docs/face-files.png)
+
+Deep links: `#terminal`, `#files`, `#files:path/to/file`.
+
+Binds to `127.0.0.1` by default. `ANTIGEM_BIND=0.0.0.0` exposes it to the LAN — it has **no
+authentication**, so only do that on a network you trust.
 
 ## Commands
 
@@ -65,6 +103,7 @@ when the host has none.
 | `--doctor` | platform, libc, node, engines, storage, capabilities |
 | `--list` | detected engines with ready / missing / incompatible |
 | `--agent NAME` | start `claude`, `codex`, `agy` or `opencode` |
+| `--serve [PORT]` | start the web face (chat / terminal / files) |
 | `--exec "CMD"` | run any command inside the portable environment |
 | `--import [--with-mcp]` | copy `~/.claude.json`, `.codex/{config.toml,auth.json}`, `.gemini/*`, opencode config |
 | `--update` | download/refresh the pinned portable Node |
@@ -82,7 +121,9 @@ when the host has none.
 | `ANTIGEM_WORKSPACE` | `data/workspace` | default working directory |
 | `ANTIGEM_HOME` | `data/home` | where the portable `HOME` points |
 | `ANTIGEM_STRICT` | `0` | `1` → fail instead of warn on a missing engine |
-| `AUTO_LAUNCH_BROWSER` | `false` | parity placeholder, unused |
+| `ANTIGEM_BIND` / `ANTIGEM_PORT` | `127.0.0.1` / `8787` | web face address |
+| `ANTIGEM_AUTO_APPROVE` | `1` | let agents use tools without prompting (the app's behaviour); `0` → read-only |
+| `AUTO_LAUNCH_BROWSER` | `0` | `1` → open the web face in the default browser |
 
 ## Folder layout
 
@@ -91,12 +132,15 @@ antigem-portable/
 ├── linux.sh · mac.sh · windows.bat     # entry points
 ├── scripts/
 │   ├── portable.sh                     # main: platform, runtime, isolation, menu
-│   └── portable.ps1                    # Windows equivalent
+│   ├── portable.ps1                    # Windows equivalent
+│   └── serve.py                        # web face backend (stdlib only)
+├── web/                                # web face frontend (html/css/js)
 ├── runtimes/<target>/node/             # portable Node (desktop only, Termux uses its own)
 ├── runtimes/proot/ubuntu/              # glibc sandbox (optional, --proot)
 ├── packages/                           # downloads + checksum lists (auto-cleaned)
 ├── data/
 │   ├── home/                           # portable HOME: configs, sessions, credentials
+│   ├── sessions/                       # web face conversations
 │   ├── tmp/                            # portable TMPDIR
 │   ├── workspace/                      # default working directory for agents
 │   └── config.env                      # settings

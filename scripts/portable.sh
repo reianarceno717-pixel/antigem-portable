@@ -9,7 +9,7 @@
 set -eu
 
 APP_NAME="AntiGem Portable"
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 DATA="$ROOT/data"
@@ -47,6 +47,7 @@ usage: ${0##*/} [command]
   --proot                    install the glibc sandbox (Ubuntu rootfs) for engines
                              that cannot run on Termux/bionic, e.g. opencode
   --list                     list detected engines
+  --serve [PORT]             start the web face (chat/terminal/files) in a browser
   --workspace DIR            working directory for agents (default ./data/workspace)
   --no-isolate               keep the host HOME instead of ./data/home
   --dry-run                  print what would run, change nothing
@@ -58,7 +59,9 @@ env overrides:
   ANTIGEM_WORKSPACE  default working directory
   ANTIGEM_HOME       override portable home (default ./data/home)
   ANTIGEM_STRICT     =1 -> fail instead of warning when an engine is missing
-  AUTO_LAUNCH_BROWSER no-op placeholder kept for parity with the technique
+  ANTIGEM_BIND       web face bind address (default 127.0.0.1)
+  ANTIGEM_PORT       web face port (default 8787)
+  AUTO_LAUNCH_BROWSER =1 -> open the web face in a browser after starting
 EOF
 }
 
@@ -285,7 +288,10 @@ proot_rootfs() { [ -x "$ROOT/runtimes/proot/ubuntu/bin/sh" ]; }
 proot_engine() { [ -x "$ROOT/runtimes/proot/ubuntu/usr/local/bin/$1" ]; }
 engine_display() {
   name=$1; st=$(engine_status "$name")
-  if [ "$st" = "incompatible" ] && proot_engine "$name"; then echo "ready (proot)"; else echo "$st"; fi
+  if proot_engine "$name"; then
+    case "$st" in incompatible|missing) echo "ready (proot)"; return ;; esac
+  fi
+  echo "$st"
 }
 
 list_engines() {
@@ -409,13 +415,35 @@ cmd_exec() {
   sh -c "$cmd"
 }
 
+cmd_serve() {
+  port=${1:-${ANTIGEM_PORT:-8787}}
+  bind=${ANTIGEM_BIND:-127.0.0.1}
+  have python3 || die "the web face needs python3 (pkg install python / apt install python3)"
+  [ -f "$ROOT/scripts/serve.py" ] || die "scripts/serve.py is missing from this checkout"
+  info "AntiGem web face  ·  http://$bind:$port"
+  log "${C_DIM}workspace: $WORKSPACE${C_OFF}"
+  log "${C_DIM}ctrl-c to stop${C_OFF}"
+  if [ "${DRY_RUN:-0}" = "1" ]; then
+    log "would run: python3 '$ROOT/scripts/serve.py' --port $port --host $bind --workspace '$WORKSPACE'"
+    return
+  fi
+  if [ "${AUTO_LAUNCH_BROWSER:-0}" = "1" ]; then
+    ( sleep 1
+      for b in xdg-open open termux-open-url sensible-browser; do
+        have "$b" && { "$b" "http://127.0.0.1:$port" >/dev/null 2>&1; break; }
+      done ) &
+  fi
+  python3 "$ROOT/scripts/serve.py" --port "$port" --host "$bind" --workspace "$WORKSPACE" || true
+}
+
 cmd_menu() {
   printf '\n%s%s%s\n' "$C_BOLD" "$APP_NAME $VERSION" "$C_OFF"
   printf '%s%s · %s · node %s%s\n\n' "$C_DIM" "$TARGET" "$(libc_kind)" "${RUN_NODE:-none}" "$C_OFF"
   while :; do
     printf '%s1)%s Workspace — start an agent      %s4)%s Import host credentials\n' "$C_CYAN" "$C_OFF" "$C_CYAN" "$C_OFF"
     printf '%s2)%s Doctor    — environment report   %s5)%s Update portable Node\n' "$C_CYAN" "$C_OFF" "$C_CYAN" "$C_OFF"
-    printf '%s3)%s Terminal  — portable shell      %s6)%s Quit\n\n' "$C_CYAN" "$C_OFF" "$C_CYAN" "$C_OFF"
+    printf '%s3)%s Terminal  — portable shell      %s6)%s Web face — open in a browser\n' "$C_CYAN" "$C_OFF" "$C_CYAN" "$C_OFF"
+    printf '                                    %s7)%s Quit\n\n' "$C_CYAN" "$C_OFF"
     printf 'choice> '
     read -r choice || exit 0
     case "$choice" in
@@ -426,7 +454,9 @@ cmd_menu() {
       3) ( cd "$WORKSPACE" && exec "${SHELL:-sh}" ) ;;
       4) cmd_import; cmd_doctor | tail -3 ;;
       5) cmd_update ;;
-      6|q|quit|exit) exit 0 ;;
+      6) printf 'port (%s)> ' "${ANTIGEM_PORT:-8787}"; read -r p || exit 0
+         cmd_serve "${p:-${ANTIGEM_PORT:-8787}}" ;;
+      7|q|quit|exit) exit 0 ;;
       *) warn "unknown choice: $choice" ;;
     esac
     printf '\n'
@@ -441,8 +471,8 @@ AGENT_ARG=""
 EXEC_ARG=""
 WORKSPACE_OVERRIDE=""
 DRY_RUN=0
-WITH_MCP=0
 NO_ISOLATE=0
+SERVE_PORT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -452,6 +482,8 @@ while [ $# -gt 0 ]; do
     --update)    CMD="update" ;;
     --import)    CMD="import" ;;
     --proot)     CMD="proot" ;;
+    --serve)     CMD="serve"
+                 case "${2:-}" in ''|--*|[!0-9]*) SERVE_PORT="" ;; *) SERVE_PORT=$2; shift ;; esac ;;
     --agent)     CMD="agent"; AGENT_ARG=${2:?--agent needs a name}; shift ;;
     --exec)      CMD="exec";  EXEC_ARG=${2:?--exec needs a command}; shift ;;
     --workspace) WORKSPACE_OVERRIDE=${2:?--workspace needs a path}; shift ;;
@@ -477,6 +509,7 @@ case "$CMD" in
   list)   cmd_list ;;
   update) cmd_update ;;
   proot)  cmd_proot ;;
+  serve)  cmd_serve "${SERVE_PORT:-${ANTIGEM_PORT:-8787}}" ;;
   import) cmd_import; cmd_doctor | sed -n '/imported creds/p' ;;
   agent)  start_agent "$AGENT_ARG" ;;
   exec)   cmd_exec "$EXEC_ARG" ;;

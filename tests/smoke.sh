@@ -46,7 +46,8 @@ if [ -d "$ROOT/.git" ]; then
   else
     pass "git tracks no runtime/credential paths"
   fi
-  if git -C "$ROOT" grep -lIE "sk-[A-Za-z0-9]{10}|gho_|apiKey\"?[[:space:]]*:[[:space:]]*\"[A-Za-z0-9]" >/dev/null 2>&1; then
+  if git -C "$ROOT" grep -lIE "sk-[A-Za-z0-9]{10}|gho_|apiKey\"?[[:space:]]*:[[:space:]]*\"[A-Za-z0-9]" \
+       -- . ':(exclude)tests/*' >/dev/null 2>&1; then
     fail "possible secret committed"
   else
     pass "no obvious secrets in commits"
@@ -176,6 +177,77 @@ else
 fi
 grep -q 'PROCESSOR_ARCHITECTURE' "$ROOT/scripts/portable.ps1" && pass "ps1 handles ARCH" || fail "ps1 missing arch detection"
 grep -q 'Get-FileHash'           "$ROOT/scripts/portable.ps1" && pass "ps1 verifies checksums" || fail "ps1 missing checksum verify"
+
+# ----------------------------------------------------------------------------
+section "7. web face"
+for f in scripts/serve.py web/index.html web/app.css web/app.js; do
+  [ -f "$ROOT/$f" ] && pass "present: $f" || fail "missing: $f"
+done
+
+if ! command -v python3 >/dev/null 2>&1; then
+  skip "python3 not installed — the web face cannot start here"
+else
+  if python3 -c "import ast,sys;ast.parse(open(sys.argv[1]).read())" "$ROOT/scripts/serve.py" 2>/dev/null; then
+    pass "serve.py parses"
+  else
+    fail "serve.py has a syntax error"
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    node --check "$ROOT/web/app.js" 2>/dev/null && pass "app.js parses" || fail "app.js has a syntax error"
+  else
+    skip "node not available to check app.js"
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    skip "curl not available — live web face checks skipped"
+  else
+    sport=8899
+    slog=$(mktemp "${TMPDIR:-/tmp}/agp-serve.XXXXXX")
+    python3 "$ROOT/scripts/serve.py" --port "$sport" > "$slog" 2>&1 &
+    srv=$!
+    n=0
+    while [ "$n" -lt 40 ]; do
+      curl -sf -m 1 "http://127.0.0.1:$sport/api/info" >/dev/null 2>&1 && break
+      n=$((n+1)); sleep 0.25
+    done
+
+    if curl -sf -m 5 "http://127.0.0.1:$sport/api/info" > "$slog.info" 2>/dev/null; then
+      pass "server starts and answers /api/info"
+      check "info reports a version" '"version"' "$(cat "$slog.info")"
+      check "info lists agents"      '"id"'      "$(cat "$slog.info")"
+
+      body=$(curl -sf -m 5 "http://127.0.0.1:$sport/" 2>/dev/null)
+      check "serves the face at /" "AntiGem" "$body"
+      curl -sf -m 5 "http://127.0.0.1:$sport/static/app.js"  >/dev/null 2>&1 && pass "serves /static/app.js"  || fail "app.js not served"
+      curl -sf -m 5 "http://127.0.0.1:$sport/static/app.css" >/dev/null 2>&1 && pass "serves /static/app.css" || fail "app.css not served"
+
+      files=$(curl -sf -m 5 "http://127.0.0.1:$sport/api/files?path=." 2>/dev/null)
+      check "lists the workspace" '"type": "dir"' "$files"
+
+      plan=$(curl -sf -m 5 "http://127.0.0.1:$sport/api/plan?agent=claude&prompt=hi" 2>/dev/null)
+      check "plan resolves a real command" '"cmd"' "$plan"
+
+      run=$(curl -sf -m 5 -X POST "http://127.0.0.1:$sport/api/term" \
+              -H 'Content-Type: application/json' \
+              -d '{"cmd":"echo FACE_MARKER"}' 2>/dev/null)
+      rid=$(printf '%s' "$run" | sed -n 's/.*"run": *"\([^"]*\)".*/\1/p')
+      if [ -n "$rid" ]; then
+        stream=$(curl -sf -m 15 -N "http://127.0.0.1:$sport/api/stream/$rid" 2>/dev/null)
+        check "streams command output over SSE" "FACE_MARKER" "$stream"
+        check "stream ends with done"            "event: done" "$stream"
+      else
+        fail "could not start a terminal run"
+      fi
+    else
+      fail "web face did not start (see $slog)"
+      tail -3 "$slog" 2>/dev/null
+    fi
+
+    kill "$srv" 2>/dev/null
+    rm -f "$slog" "$slog.info"
+  fi
+fi
 
 # ----------------------------------------------------------------------------
 printf '\n%s%d passed, %d failed, %d skipped%s\n' "$B" "$PASS" "$FAIL" "$SKIP" "$O"

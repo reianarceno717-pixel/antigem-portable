@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AntiGem</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%237c5cff'/><circle cx='16' cy='16' r='6' fill='white'/></svg>">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── sidebar ───────────────────────────────────────────────── -->
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="logo">AG</div>
+      <div class="brand-text">
+        <b>AntiGem</b>
+        <span id="brand-sub">portable</span>
+      </div>
+      <button id="toggle-sidebar" class="icon-btn" title="Collapse sidebar">‹</button>
+    </div>
+
+    <button id="new-session" class="new-btn">
+      <span class="plus">+</span> New session
+    </button>
+
+    <div class="side-label">Sessions</div>
+    <div id="sessions" class="sessions"></div>
+
+    <div class="side-label">Engines</div>
+    <div id="agents" class="agents"></div>
+
+    <div class="side-foot">
+      <div class="row"><span>workspace</span><code id="ws-path">…</code></div>
+      <div class="row"><span>version</span><code id="ver">…</code></div>
+    </div>
+  </aside>
+
+  <!-- ── main ──────────────────────────────────────────────────── -->
+  <main id="main">
+
+    <header id="topbar">
+      <button id="open-sidebar" class="icon-btn only-narrow" title="Sessions">☰</button>
+      <div class="session-title" id="session-title">New session</div>
+      <div class="spacer"></div>
+      <div class="agent-pick">
+        <label for="agent">agent</label>
+        <select id="agent"></select>
+      </div>
+      <div id="status" class="status idle"><i></i><span>idle</span></div>
+    </header>
+
+    <nav id="tabs">
+      <button class="tab active" data-tab="chat">Chat</button>
+      <button class="tab" data-tab="terminal">Terminal</button>
+      <button class="tab" data-tab="files">Files</button>
+      <div class="spacer"></div>
+      <button id="clear" class="ghost" title="Clear the visible conversation">Clear view</button>
+    </nav>
+
+    <!-- chat -->
+    <section id="panel-chat" class="panel active">
+      <div id="messages" class="messages">
+        <div class="empty" id="empty-state">
+          <div class="empty-logo">AG</div>
+          <h1>AntiGem portable</h1>
+          <p>Your agents, in one folder. Pick an engine and start typing.</p>
+          <div class="chips">
+            <button class="chip" data-prompt="What is in this workspace?">What's in here?</button>
+            <button class="chip" data-prompt="List the files and explain what this project does.">Explain the project</button>
+            <button class="chip" data-prompt="Run the test suite and summarise the failures.">Run the tests</button>
+            <button class="chip" data-prompt="/help">Show agent help</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="composer" class="composer">
+        <textarea id="prompt" rows="1" placeholder="Message AntiGem…  (Enter to send, Shift+Enter for newline)"></textarea>
+        <button id="send" class="send" title="Send">↵</button>
+        <button id="stop" class="send stop hidden" title="Stop">■</button>
+      </div>
+    </section>
+
+    <!-- terminal -->
+    <section id="panel-terminal" class="panel">
+      <pre id="term-out" class="term-out"></pre>
+      <div class="composer term-input">
+        <span class="prompt-sign">$</span>
+        <input id="cmd" placeholder="run a command in the portable workspace" autocomplete="off" spellcheck="false">
+        <button id="run" class="send" title="Run">↵</button>
+      </div>
+    </section>
+
+    <!-- files -->
+    <section id="panel-files" class="panel">
+      <div class="files-wrap">
+        <div class="tree">
+          <div class="tree-head">
+            <button id="up" class="ghost" title="Parent folder">↑</button>
+            <code id="tree-path">.</code>
+            <button id="reload-files" class="ghost" title="Reload">⟳</button>
+          </div>
+          <div id="tree-items" class="tree-items"></div>
+        </div>
+        <div class="viewer">
+          <div class="viewer-head">
+            <code id="file-path">—</code>
+            <div class="spacer"></div>
+            <span id="file-meta" class="meta"></span>
+            <span id="dirty" class="dirty hidden">modified</span>
+            <button id="save" class="ghost hidden">Save</button>
+          </div>
+          <textarea id="file-body" spellcheck="false" placeholder="Select a file to view it."></textarea>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

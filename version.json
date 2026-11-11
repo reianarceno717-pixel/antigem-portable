@@ -1,6 +1,6 @@
 {
   "name": "AntiGem Portable",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "technique": "techjarves portable packaging (bootstrap runtime -> verify -> isolate HOME -> menu)",
   "upstream": {
     "app": "https://github.com/Santoshkurmi/antigem",
@@ -11,6 +11,18 @@
       "opencode": "https://github.com/sst/opencode"
     }
   },
-  "platforms": ["linux-x64", "linux-arm64", "macos-arm64", "macos-x64", "windows-x64", "termux-bionic"],
-  "node_pin": "v22.14.0"
+  "platforms": [
+    "linux-x64",
+    "linux-arm64",
+    "macos-arm64",
+    "macos-x64",
+    "windows-x64",
+    "termux-bionic"
+  ],
+  "node_pin": "v22.14.0",
+  "web_face": {
+    "entry": "scripts/serve.py",
+    "default": "http://127.0.0.1:8787",
+    "stack": "python3 stdlib + vanilla html/css/js"
+  }
 }
