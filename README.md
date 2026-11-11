@@ -26,6 +26,17 @@ Unlike a 3-line `exec dsh` shim, this one **refuses to launch something that can
 on Termux a glibc `opencode` binary is detected and rejected instead of failing with
 `No such file or directory`.
 
+## Preview
+
+Terminal view (rendered from the live run on this phone; a laptop shows the same layout
+with `linux-x64` / glibc / portable node `v22.14.0`):
+
+![terminal preview](docs/preview-terminal.png)
+
+And the same folder running inside a real Xfce desktop at 1600×1000, on the phone itself:
+
+![xfce preview](docs/preview-xfce-desktop.png)
+
 ## Quick start
 
 ```sh
