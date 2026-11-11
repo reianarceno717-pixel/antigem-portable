@@ -1,0 +1,7 @@
+# data, runtimes and downloads stay on the stick
+data/
+runtimes/
+packages/
+bin/*
+!bin/.keep
+*.part

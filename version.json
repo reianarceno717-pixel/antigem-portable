@@ -1,0 +1,16 @@
+{
+  "name": "AntiGem Portable",
+  "version": "0.1.0",
+  "technique": "techjarves portable packaging (bootstrap runtime -> verify -> isolate HOME -> menu)",
+  "upstream": {
+    "app": "https://github.com/Santoshkurmi/antigem",
+    "engines": {
+      "claude": "https://github.com/anthropics/claude-code",
+      "codex": "https://github.com/openai/codex",
+      "agy": "Google Antigravity CLI",
+      "opencode": "https://github.com/sst/opencode"
+    }
+  },
+  "platforms": ["linux-x64", "linux-arm64", "macos-arm64", "macos-x64", "windows-x64", "termux-bionic"],
+  "node_pin": "v22.14.0"
+}
