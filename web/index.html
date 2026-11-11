@@ -3,121 +3,134 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A0B14">
 <title>AntiGem</title>
 <link rel="stylesheet" href="/static/app.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%237c5cff'/><circle cx='16' cy='16' r='6' fill='white'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230A0B14'/><path d='M16 6l3 7 7 3-7 3-3 7-3-7-7-3 7-3z' fill='%23A78BFA'/></svg>">
 </head>
 <body>
 
 <div id="app">
 
-  <!-- ── sidebar ───────────────────────────────────────────────── -->
-  <aside id="sidebar">
-    <div class="brand">
-      <div class="logo">AG</div>
-      <div class="brand-text">
-        <b>AntiGem</b>
-        <span id="brand-sub">portable</span>
+  <!-- ── rail: drawer on the phone, permanent sidebar on desktop ── -->
+  <aside id="drawer">
+    <div class="drawer-head">
+      <div class="brand">
+        <span class="brand-mark">✦</span>
+        <span class="brand-name">AntiGem</span>
       </div>
-      <button id="toggle-sidebar" class="icon-btn" title="Collapse sidebar">‹</button>
+      <button id="drawer-close" class="icon-btn">✕</button>
     </div>
 
-    <button id="new-session" class="new-btn">
-      <span class="plus">+</span> New session
+    <button id="new-session" class="drawer-new">
+      <span>＋</span> New chat
     </button>
 
-    <div class="side-label">Sessions</div>
-    <div id="sessions" class="sessions"></div>
+    <div class="drawer-label">Histories</div>
+    <div id="sessions" class="drawer-list"></div>
 
-    <div class="side-label">Engines</div>
-    <div id="agents" class="agents"></div>
+    <div class="drawer-label">Workspace</div>
+    <button class="drawer-row" id="open-chat"><span class="ri">✦</span> Chat</button>
+    <button class="drawer-row" id="open-term"><span class="ri">▚</span> Terminal</button>
+    <button class="drawer-row" id="open-files"><span class="ri">▤</span> Files</button>
 
-    <div class="side-foot">
-      <div class="row"><span>workspace</span><code id="ws-path">…</code></div>
-      <div class="row"><span>version</span><code id="ver">…</code></div>
+    <div class="drawer-label">Agents</div>
+    <div id="agents" class="drawer-agents"></div>
+
+    <div class="drawer-foot">
+      <code id="ws-path">…</code>
+      <span id="ver">…</span>
     </div>
   </aside>
+  <div id="scrim"></div>
 
-  <!-- ── main ──────────────────────────────────────────────────── -->
-  <main id="main">
+  <!-- ── main column ────────────────────────────────────────────── -->
+  <div id="column">
 
     <header id="topbar">
-      <button id="open-sidebar" class="icon-btn only-narrow" title="Sessions">☰</button>
-      <div class="session-title" id="session-title">New session</div>
-      <div class="spacer"></div>
-      <div class="agent-pick">
-        <label for="agent">agent</label>
-        <select id="agent"></select>
-      </div>
-      <div id="status" class="status idle"><i></i><span>idle</span></div>
+      <button id="menu-btn" class="icon-btn hamburger" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+      <div id="title" class="title">New Chat</div>
+      <button id="proj-chip" class="proj-chip" title="Workspace">
+        <i class="dot"></i>
+        <span class="emoji">📁</span>
+        <span id="proj-name">workspace</span>
+      </button>
+      <button id="attach-btn" class="icon-btn note" title="Files">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg>
+      </button>
     </header>
 
-    <nav id="tabs">
-      <button class="tab active" data-tab="chat">Chat</button>
-      <button class="tab" data-tab="terminal">Terminal</button>
-      <button class="tab" data-tab="files">Files</button>
-      <div class="spacer"></div>
-      <button id="clear" class="ghost" title="Clear the visible conversation">Clear view</button>
-    </nav>
-
     <!-- chat -->
-    <section id="panel-chat" class="panel active">
-      <div id="messages" class="messages">
-        <div class="empty" id="empty-state">
-          <div class="empty-logo">AG</div>
-          <h1>AntiGem portable</h1>
-          <p>Your agents, in one folder. Pick an engine and start typing.</p>
-          <div class="chips">
-            <button class="chip" data-prompt="What is in this workspace?">What's in here?</button>
-            <button class="chip" data-prompt="List the files and explain what this project does.">Explain the project</button>
-            <button class="chip" data-prompt="Run the test suite and summarise the failures.">Run the tests</button>
-            <button class="chip" data-prompt="/help">Show agent help</button>
-          </div>
-        </div>
+    <main id="view-chat" class="view active">
+      <div id="messages" class="messages"></div>
+
+      <div id="status" class="status hidden"><i></i><span>idle</span></div>
+
+      <div id="chips" class="chips">
+        <button class="chip on" title="Agents may use tools without asking"><span class="ci">✦</span> Auto</button>
+        <button class="chip" title="Engine default reasoning effort"><span class="ci">✎</span> Effort · Default (Medium)</button>
+        <button class="chip warm" title="The agent reasons before it answers"><span class="ci">☼</span> Thinking</button>
+        <button class="chip cool" title="Prompt cache lifetime reported by the engine"><span class="ci">◔</span> Cache 61m</button>
       </div>
 
       <div id="composer" class="composer">
-        <textarea id="prompt" rows="1" placeholder="Message AntiGem…  (Enter to send, Shift+Enter for newline)"></textarea>
-        <button id="send" class="send" title="Send">↵</button>
-        <button id="stop" class="send stop hidden" title="Stop">■</button>
+        <textarea id="prompt" rows="1" placeholder="Reply to Claude…"></textarea>
+        <div class="composer-row">
+          <button id="plus" class="plus" title="More">＋</button>
+          <button id="model-chip" class="model-chip">
+            <span class="spark">✦</span> Default <span class="model-sub">(Sonnet 5.5)</span>
+            <b class="quota">90%</b>
+            <span class="caret">▾</span>
+          </button>
+          <div class="spacer"></div>
+          <button id="send" class="send" title="Send">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 20l16-8L4 4v6l10 2-10 2z" fill="currentColor"/></svg>
+          </button>
+          <button id="stop" class="send stop hidden" title="Stop"><i></i></button>
+        </div>
       </div>
-    </section>
+    </main>
 
     <!-- terminal -->
-    <section id="panel-terminal" class="panel">
+    <section id="view-terminal" class="view">
       <pre id="term-out" class="term-out"></pre>
-      <div class="composer term-input">
+      <div class="term-bar">
         <span class="prompt-sign">$</span>
-        <input id="cmd" placeholder="run a command in the portable workspace" autocomplete="off" spellcheck="false">
-        <button id="run" class="send" title="Run">↵</button>
+        <input id="cmd" placeholder="run a command in the workspace" autocomplete="off" spellcheck="false">
+        <button id="run" class="send sm" title="Run">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 20l16-8L4 4v6l10 2-10 2z" fill="currentColor"/></svg>
+        </button>
       </div>
     </section>
 
     <!-- files -->
-    <section id="panel-files" class="panel">
+    <section id="view-files" class="view">
       <div class="files-wrap">
         <div class="tree">
           <div class="tree-head">
-            <button id="up" class="ghost" title="Parent folder">↑</button>
+            <button id="up" class="icon-btn" title="Parent">↑</button>
             <code id="tree-path">.</code>
-            <button id="reload-files" class="ghost" title="Reload">⟳</button>
+            <button id="reload-files" class="icon-btn" title="Reload">⟳</button>
           </div>
           <div id="tree-items" class="tree-items"></div>
         </div>
         <div class="viewer">
           <div class="viewer-head">
+            <button id="back-files" class="icon-btn back-only" title="Back">←</button>
             <code id="file-path">—</code>
             <div class="spacer"></div>
             <span id="file-meta" class="meta"></span>
             <span id="dirty" class="dirty hidden">modified</span>
             <button id="save" class="ghost hidden">Save</button>
           </div>
-          <textarea id="file-body" spellcheck="false" placeholder="Select a file to view it."></textarea>
+          <textarea id="file-body" spellcheck="false" placeholder="Select a file"></textarea>
         </div>
       </div>
     </section>
 
-  </main>
+  </div>
 </div>
 
 <script src="/static/app.js"></script>

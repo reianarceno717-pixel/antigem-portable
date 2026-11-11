@@ -9,7 +9,7 @@
 set -eu
 
 APP_NAME="AntiGem Portable"
-VERSION="0.2.0"
+VERSION="0.2.1"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 DATA="$ROOT/data"

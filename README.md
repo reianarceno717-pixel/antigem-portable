@@ -30,17 +30,29 @@ on Termux a glibc `opencode` binary is detected and rejected instead of failing 
 
 ## Preview
 
-The web face, running on this phone — real `codex` turns, real tool calls, real files:
+Two shells, one product — the same engines behind a phone layout and a desktop layout.
+
+Phone, at 390×844 (the app's own screen shape):
 
 ![chat](docs/face-chat.png)
 
-The same folder inside a real Xfce desktop at 1600×1000, also on the phone:
+Laptop / PC, at 1440×900 — permanent rail, centred chat, wide tool rows:
 
-![xfce preview](docs/preview-xfce-desktop.png)
+![desktop](docs/face-chat-desktop.png)
+
+Empty state with the agent row, then the workspace browser:
+
+![new chat](docs/face-new.png)
+
+![files](docs/face-files.png)
 
 And the menu when you don't want a browser:
 
 ![terminal preview](docs/preview-terminal.png)
+
+The same folder inside a real Xfce desktop at 1600×1000, also on the phone:
+
+![xfce preview](docs/preview-xfce-desktop.png)
 
 ## Quick start
 
@@ -77,21 +89,46 @@ trick DeepSeek Harness uses, which is why it survives the move from phone to lap
 Everything runs from the portable folder: the same isolated `HOME`, the same workspace, the same
 engines. No npm, no pip, no build step — `python3` plus the browser you already have.
 
-| Tab | What it does |
+### It is the app, not a lookalike
+
+The palette is read out of the app's own theme code (`theme/AppTheme.kt`, the default dark theme
+**Midnight Aurora**), so the colours are the ones on the phone:
+
+| | |
 |---|---|
-| **Chat** | streaming replies, inline tool cards with the command and its exit code, markdown, one session per conversation (saved in `data/sessions/`) |
+| background / surface / card | `#0A0B14` · `#0F111C` · `#151826` |
+| text / muted | `#E8EAF6` · `#9AA1BF` |
+| primary / user bubble | `#A78BFA` · `#252A47` |
+| success / warning / danger | `#4ADE80` · `#FBBF24` · `#FB7185` |
+
+The shapes follow the app too: the hamburger, the truncated bold title, the workspace chip with its
+green dot, the right-aligned user bubble with *Show more*, the muted **Thinking process** row, the
+`⌘ Running command…` rows, the orange **Accomplishing…** spinner, the chip strip, and the composer
+with `+`, a model chip and the send/stop button.
+
+### One face, two layouts
+
+| Width | Layout |
+|---|---|
+| under 1024 px | drawer + a single column — the phone screen, unchanged |
+| 1024 px and up | the rail stays open, the chat is centred at ~780 px, files split into tree + editor |
+
+That is the ChatGPT arrangement: the same product, a shell that knows how wide the window is.
+
+| View | What it does |
+|---|---|
+| **Chat** | streaming replies, tool rows that expand into the command and its output, thinking rows, markdown, one session per conversation (`data/sessions/`) |
 | **Terminal** | real commands in the portable environment, with scrollback that survives a reload |
-| **Files** | browse the workspace, open and edit files, save with `Ctrl-S` |
+| **Files** | browse, open and edit the workspace; `Ctrl-S` saves; on a phone it drills into the editor and back |
+
+`claude`, `agy` and `codex` stream structured JSON, so tool calls and thinking render as their own
+rows instead of a wall of text. `opencode` runs through the glibc sandbox when the host needs one.
+The **Auto** chip is a real switch: on, the engine gets write and tool permissions for that run; off,
+`codex` is pinned to `read-only` and the Claude-family CLIs drop `--dangerously-skip-permissions`.
 
 ![terminal](docs/face-terminal.png)
 
-Sidebar: sessions, engine states, agent picker, and a status pill that counts the run.
-`claude`, `agy` and `codex` stream structured JSON, so tool calls render as cards instead of a wall
-of text. `opencode` runs through the glibc sandbox when the host needs one.
-
-![files](docs/face-files.png)
-
-Deep links: `#terminal`, `#files`, `#files:path/to/file`.
+Deep links: `#new`, `#chat:<session-id>`, `#terminal`, `#files`, `#files:path/to/file`.
 
 Binds to `127.0.0.1` by default. `ANTIGEM_BIND=0.0.0.0` exposes it to the LAN — it has **no
 authentication**, so only do that on a network you trust.

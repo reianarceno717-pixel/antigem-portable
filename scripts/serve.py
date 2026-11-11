@@ -28,7 +28,7 @@ SESSIONS = DATA / "sessions"
 SESSIONS.mkdir(parents=True, exist_ok=True)
 WORKSPACE = Path(os.environ.get("ANTIGEM_WORKSPACE") or (DATA / "workspace")).resolve()
 WORKSPACE.mkdir(parents=True, exist_ok=True)
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 HOST = os.environ.get("ANTIGEM_BIND", "127.0.0.1")
 PORT = int(os.environ.get("ANTIGEM_PORT", "8787"))
@@ -97,8 +97,9 @@ def detect_agents():
 AGENTS = detect_agents()
 
 
-def build_cmd(agent, prompt):
-    auto = os.environ.get("ANTIGEM_AUTO_APPROVE", "1") != "0"
+def build_cmd(agent, prompt, auto=None):
+    if auto is None:
+        auto = os.environ.get("ANTIGEM_AUTO_APPROVE", "1") != "0"
     if agent == "claude":
         cmd = [which("claude"), "-p", prompt, "--output-format", "stream-json", "--verbose"]
         if auto:
@@ -161,9 +162,9 @@ def list_sessions():
 
 
 # --------------------------------------------------------------------------- runs
-def start_run(kind, agent, prompt, sid=None):
+def start_run(kind, agent, prompt, sid=None, auto=None):
     rid = uuid.uuid4().hex[:12]
-    cmd = build_cmd(agent, prompt)
+    cmd = build_cmd(agent, prompt, auto)
     if not cmd or not cmd[0]:
         raise RuntimeError(f"agent '{agent}' is not installed")
 
@@ -211,6 +212,8 @@ def start_run(kind, agent, prompt, sid=None):
                     elif ev_kind == "tool":
                         run["parts"].append({"type": "tool", "name": payload.get("name"),
                                              "input": payload.get("input")})
+                    elif ev_kind == "think":
+                        run["parts"].append({"type": "think", "text": str(payload)})
                     run["queue"].put((ev_kind, payload))
             proc.wait()
             run["code"] = proc.returncode
@@ -239,7 +242,7 @@ def start_run(kind, agent, prompt, sid=None):
 
 
 def parse_line(line):
-    """Turn one CLI output line into ('message'|'tool'|'final', payload) events."""
+    """Turn one CLI output line into ('message'|'tool'|'think'|'final', payload) events."""
     txt = strip_ansi(line).rstrip("\n")
     if not txt.strip():
         return []
@@ -276,6 +279,8 @@ def _parse_object(obj):
                 continue
             if c.get("type") == "text" and c.get("text"):
                 out.append(("message", c["text"]))
+            elif c.get("type") == "thinking" and c.get("thinking"):
+                out.append(("think", c["thinking"]))
             elif c.get("type") == "tool_use":
                 out.append(("tool", {"name": c.get("name"), "input": c.get("input")}))
         return out
@@ -310,7 +315,8 @@ def _parse_object(obj):
         if t == "item.completed" and kind in ("file_change", "patch"):
             return [("tool", {"name": kind, "input": item.get("changes") or item})]
         if t == "item.completed" and kind == "reasoning":
-            return []
+            txt = item.get("text") or ""
+            return [("think", txt)] if txt.strip() else []
         return []
 
     # ---- anything else with a text field
@@ -478,12 +484,14 @@ class Handler(BaseHTTPRequestHandler):
             agent = data.get("agent") or "claude"
             prompt = (data.get("prompt") or "").strip()
             sid = data.get("session")
+            auto = data.get("auto")
             if not prompt:
                 return self.send_json({"error": "empty prompt"}, 400)
             if not sid:
                 sid = create_session(agent)["id"]
             try:
-                rid = start_run("chat", agent, prompt, sid)
+                rid = start_run("chat", agent, prompt, sid,
+                                auto=None if auto is None else bool(auto))
             except Exception as e:  # noqa: BLE001
                 return self.send_json({"error": str(e)}, 500)
             return self.send_json({"run": rid, "session": sid})

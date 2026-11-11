@@ -1,37 +1,42 @@
 /* ==========================================================================
-   AntiGem — web face
-   Talks to scripts/serve.py. No framework, no build step.
+   AntiGem Web — front end
+   Same engine as the app (claude / codex / agy / opencode), served by serve.py.
+   Phone: drawer + one column. Desktop: permanent rail + centred chat.
    ========================================================================== */
 'use strict';
 
 const $  = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+const AGENT_LABEL = {
+  claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity',
+  opencode: 'OpenCode', shell: 'Shell', you: 'You',
+};
+
 const state = {
   info: null,
   agents: [],
   sessions: [],
-  session: null,      // current session id
+  session: null,
   agent: 'claude',
-  run: null,          // active run id
-  tab: 'chat',
+  run: null,
+  view: 'chat',
+  auto: true,
   file: { path: null, original: '' },
   treePath: '.',
+  chatTitle: 'New chat',
 };
 
-/* ── tiny api client ─────────────────────────────────────────────────── */
+/* ── api ─────────────────────────────────────────────────────────────── */
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   let data = {};
-  try { data = await res.json(); } catch { /* empty body */ }
+  try { data = await res.json(); } catch { /* empty */ }
   if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
   return data;
 }
 
-/* ── markdown-lite (safe: escape first, then decorate) ────────────────── */
+/* ── markdown-lite ───────────────────────────────────────────────────── */
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -47,9 +52,7 @@ function md(src) {
 
   s = s
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-    .replace(/^### (.+)$/gm, '<strong>$1</strong>')
-    .replace(/^## (.+)$/gm, '<strong>$1</strong>')
-    .replace(/^# (.+)$/gm, '<strong>$1</strong>')
+    .replace(/^#{1,3} (.+)$/gm, '<strong>$1</strong>')
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/\[([^\]]+)\]\((?!https?:)[^)]*\)/g, '<code>$1</code>')
@@ -59,115 +62,141 @@ function md(src) {
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => blocks[+i]);
 }
 
-/* ── status pill ─────────────────────────────────────────────────────── */
+/* ── status ──────────────────────────────────────────────────────────── */
 const statusEl = $('#status');
 let statusTimer = null;
 
-function setStatus(kind, text) {
+function showStatus(kind, text) {
   statusEl.className = 'status ' + kind;
   $('span', statusEl).textContent = text;
 }
 
-function statusRunning(label) {
+function hideStatus() { statusEl.className = 'status hidden'; }
+
+function statusRunning(text) {
   const t0 = Date.now();
-  setStatus('live', label);
+  showStatus('live', text);
   clearInterval(statusTimer);
   statusTimer = setInterval(() => {
-    const s = Math.round((Date.now() - t0) / 1000);
-    setStatus('live', `${label} · ${s}s`);
+    showStatus('live', `${text} · ${Math.round((Date.now() - t0) / 1000)}s`);
   }, 1000);
 }
 
-function statusDone(label) {
-  clearInterval(statusTimer);
-  setStatus('done', label);
-}
-
-function statusError(msg) {
-  clearInterval(statusTimer);
-  setStatus('err', msg);
-}
+function statusError(text) { clearInterval(statusTimer); showStatus('err', text); }
+function statusDone(text) { clearInterval(statusTimer); showStatus('done', text); setTimeout(hideStatus, 4000); }
 
 /* ── boot ────────────────────────────────────────────────────────────── */
-function shortPath(p) {
-  const parts = String(p).split('/').filter(Boolean);
-  return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/');
-}
-
 async function boot() {
-  bindUI();
+  wire();
   try {
     const info = await api('/api/info');
     state.info = info;
     state.agents = info.agents || [];
     state.sessions = info.sessions || [];
     state.agent = info.default_agent || 'claude';
+    if (!ready(state.agent)) {
+      const r = state.agents.find(a => ready(a.id));
+      if (r) state.agent = r.id;
+    }
 
     $('#ws-path').textContent = shortPath(info.workspace);
     $('#ws-path').title = info.workspace;
-    $('#brand-sub').textContent = `portable ${info.version}`;
-    $('#ver').textContent = `${info.version} · ${info.platform}`;
+    $('#ver').textContent = `v${info.version} · ${info.platform}`;
 
     renderAgents();
     renderSessions();
-    if (!state.agents.some(a => a.id === state.agent && a.status.startsWith('ready'))) {
-      const ready = state.agents.find(a => a.status.startsWith('ready'));
-      if (ready) state.agent = ready.id;
-    }
-    $('#agent').value = state.agent;
 
-    if (state.sessions.length) openSession(state.sessions[0].id);
-    applyHash();
-  } catch (e) {
-    statusError('offline');
+    if (hashView() === 'new') {
+      showEmpty();
+      setTitle('New chat');
+    } else {
+      const target = hashSession();
+      if (target && state.sessions.some(s => s.id === target)) await openSession(target);
+      else if (state.sessions.length) await openSession(state.sessions[0].id);
+      else showEmpty();
+    }
+    applyHash();  } catch (e) {
+    statusError('server unreachable');
     console.error(e);
   }
 }
 
-function applyHash() {
-  const h = decodeURIComponent(location.hash.slice(1));
-  if (!h) return;
-  const [tab, arg] = h.split(':');
-  if (tab === 'files') {
-    setTab('files');
-    if (arg) setTimeout(() => openFile(arg), 150);
-  } else if (tab === 'terminal' || tab === 'chat') {
-    setTab(tab);
-  }
+const ready = id => (state.agents.find(a => a.id === id) || {}).status?.startsWith('ready');
+
+function shortPath(p) {
+  const parts = String(p).split('/').filter(Boolean);
+  return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/');
 }
 
 /* ── agents ──────────────────────────────────────────────────────────── */
 function renderAgents() {
+  // drawer list
   const box = $('#agents');
   box.innerHTML = '';
-  const sel = $('#agent');
-  sel.innerHTML = '';
-
   for (const a of state.agents) {
-    const ready = a.status.startsWith('ready');
-
-    const row = document.createElement('div');
-    row.className = 'agent-row' + (a.id === state.agent ? ' on' : '');
-    row.innerHTML = `<span class="dot ${ready ? 'ready' : ''}"></span>
-                     <span class="lbl">${esc(a.label)}</span>
+    const row = document.createElement('button');
+    row.className = 'drawer-row';
+    row.innerHTML = `<span class="dot ${ready(a.id) ? 'ready' : ''}"></span>
+                     <span>${esc(a.label)}</span>
                      <span class="st">${esc(a.status)}</span>`;
     row.title = a.path || 'not installed';
-    row.onclick = () => {
-      state.agent = a.id;
-      $('#agent').value = a.id;
-      renderAgents();
-      if (!ready) setStatus('err', `${a.label} not installed`);
-    };
+    row.onclick = () => selectAgent(a.id);
     box.appendChild(row);
-
-    const opt = document.createElement('option');
-    opt.value = a.id;
-    opt.textContent = `${a.label}${ready ? '' : ' — missing'}`;
-    opt.disabled = !ready && a.id !== 'shell';
-    sel.appendChild(opt);
   }
 
-  sel.value = state.agent;
+  // top-bar project chip (the app shows the open project here, not the agent)
+  const proj = state.info.workspace.split('/').filter(Boolean).pop() || 'workspace';
+  $('#proj-name').textContent = proj;
+  $('#proj-chip').title = state.info.workspace;
+
+  // empty-state pills
+  renderEmptyPills();
+}
+
+function selectAgent(id) {
+  state.agent = id;
+  renderAgents();
+  $('#prompt').placeholder = `Reply to ${AGENT_LABEL[id] || id}…`;
+  if (!ready(id)) statusError(`${AGENT_LABEL[id] || id} is not installed`);
+}
+
+/* ── empty state ─────────────────────────────────────────────────────── */
+function emptyNode() {
+  const wrap = document.createElement('div');
+  wrap.className = 'empty';
+  wrap.id = 'empty';
+  const pillIds = ['agy', 'claude', 'opencode', 'codex'].filter(id => state.agents.some(a => a.id === id));
+  wrap.innerHTML = `
+    <div class="agent-pills">${pillIds.map(id => `
+      <button data-agent="${id}" class="${id === state.agent ? 'on' : ''}">
+        <span class="dot"></span>${esc(AGENT_LABEL[id] || id)}
+      </button>`).join('')}
+    </div>
+    <h1>How can I help you today?</h1>
+    <p>Ask a question, brainstorm ideas, or start coding</p>`;
+
+  $$('.agent-pills button', wrap).forEach(b => {
+    b.onclick = () => { selectAgent(b.dataset.agent); renderEmptyPills(); };
+  });
+  return wrap;
+}
+
+function renderEmptyPills() {
+  const old = $('#empty');
+  if (!old) return;
+  const fresh = emptyNode();
+  old.replaceWith(fresh);
+}
+
+function showEmpty() {
+  const box = $('#messages');
+  box.innerHTML = '';
+  box.appendChild(emptyNode());
+}
+
+function hideEmpty() {
+  const e = $('#empty');
+  if (e) e.remove();
 }
 
 /* ── sessions ────────────────────────────────────────────────────────── */
@@ -175,18 +204,20 @@ function renderSessions() {
   const box = $('#sessions');
   box.innerHTML = '';
   if (!state.sessions.length) {
-    box.innerHTML = '<div class="session" style="cursor:default;color:#4a5266">no sessions yet</div>';
+    const d = document.createElement('div');
+    d.className = 'drawer-item';
+    d.style.cursor = 'default';
+    d.textContent = 'no chats yet';
+    box.appendChild(d);
     return;
   }
   for (const s of state.sessions) {
-    const el = document.createElement('div');
-    el.className = 'session' + (s.id === state.session ? ' active' : '');
-    el.innerHTML = `<span class="dot"></span>
-                    <span class="name">${esc(s.title || 'session')}</span>
-                    <span class="n">${s.count ?? 0}</span>`;
-    el.title = `${s.title}\n${s.agent} · ${s.count} messages`;
-    el.onclick = () => openSession(s.id);
-    box.appendChild(el);
+    const b = document.createElement('button');
+    b.className = 'drawer-item' + (s.id === state.session ? ' on' : '');
+    b.innerHTML = `<span class="t">${esc(s.title || 'chat')}</span>`;
+    b.title = `${s.title}\n${s.agent} · ${s.count} messages`;
+    b.onclick = () => openSession(s.id);
+    box.appendChild(b);
   }
 }
 
@@ -202,120 +233,150 @@ async function openSession(id) {
   try {
     const s = await api('/api/session/' + id);
     state.session = s.id;
-    if (s.agent) {
-      state.agent = s.agent;
-      $('#agent').value = s.agent;
-      renderAgents();
-    }
-    $('#session-title').textContent = s.title || 'Session';
-    document.title = `${s.title || 'AntiGem'} — AntiGem`;
+    if (s.agent) selectAgent(s.agent);
+    setTitle(s.title || 'Chat');
     renderMessages(s.messages || []);
     renderSessions();
-    closeNav();
-  } catch (e) {
-    statusError('cannot open session');
+    setView('chat');
+    closeDrawer();
+  } catch {
+    statusError('cannot open chat');
+  }
+}
+
+function setTitle(t) {
+  state.chatTitle = t;
+  if (state.view === 'chat') {
+    $('#title').textContent = t;
+    document.title = `${t} — AntiGem`;
   }
 }
 
 function renderMessages(messages) {
   const box = $('#messages');
   box.innerHTML = '';
-  if (!messages.length) {
-    box.appendChild(emptyState());
-    return;
-  }
+  if (!messages.length) { showEmpty(); return; }
   for (const m of messages) addMessage(m.role, m);
   scrollDown(true);
 }
 
-function emptyState() {
-  const wrap = document.createElement('div');
-  wrap.className = 'empty';
-  wrap.id = 'empty-state';
-  wrap.innerHTML = `
-    <div class="empty-logo">AG</div>
-    <h1>AntiGem portable</h1>
-    <p>Your agents, in one folder. Pick an engine and start typing.</p>
-    <div class="chips">
-      <button class="chip" data-prompt="What is in this workspace?">What's in here?</button>
-      <button class="chip" data-prompt="List the files and explain what this project does.">Explain the project</button>
-      <button class="chip" data-prompt="Run the test suite and summarise the failures.">Run the tests</button>
-      <button class="chip" data-prompt="/help">Show agent help</button>
-    </div>`;
-  $$('.chip', wrap).forEach(c => {
-    c.onclick = () => { $('#prompt').value = c.dataset.prompt; sendChat(); };
-  });
-  return wrap;
+/* ── rendering ───────────────────────────────────────────────────────── */
+function thinkBlock(text, open = true) {
+  const el = document.createElement('div');
+  el.className = 'think' + (open ? ' open' : '');
+  el.innerHTML = `<div class="think-head"><span class="chev">›</span>
+      <span class="gl">✳</span><span>Thinking process</span></div>
+    <div class="think-body">${esc(text || '')}</div>`;
+  $('.think-head', el).onclick = () => el.classList.toggle('open');
+  return el;
 }
 
-/* ── messages ────────────────────────────────────────────────────────── */
-const AGENT_LABEL = {
-  claude: 'Claude Code', codex: 'Codex', agy: 'Antigravity',
-  opencode: 'OpenCode', shell: 'Shell', you: 'You',
+const TOOL_ICON = {
+  shell: '⌘', command_execution: '⌘', file_change: '✎', patch: '✎',
 };
 
-function toolCard(name, input) {
-  const card = document.createElement('div');
-  card.className = 'tool';
+const TOOL_LABEL = {
+  shell: 'Running command…', command_execution: 'Running command…',
+  file_change: 'Editing file…', patch: 'Editing file…',
+};
 
-  const isShell = name === 'shell' && input && typeof input === 'object' && input.command;
-  const summary = isShell ? input.command : JSON.stringify(input ?? {});
+function toolBlock(name, input) {
+  const isShell = (name === 'shell' || name === 'command_execution') && input && input.command;
+  const label = isShell ? 'Running command…' : (TOOL_LABEL[name] || `Using ${name || 'tool'}…`);
+  const detail = isShell ? prettyCmd(input.command) : oneLine(JSON.stringify(input ?? {}), 52);
+  const exit = isShell && input.exit_code !== null && input.exit_code !== undefined ? input.exit_code : null;
+
   let body;
   if (isShell) {
-    body = '$ ' + input.command;
-    if (input.output) body += '\n\n' + input.output;
+    body = '$ ' + input.command + (input.output ? '\n\n' + input.output : '');
   } else {
     body = typeof input === 'string' ? input : JSON.stringify(input ?? {}, null, 2);
   }
 
-  let code = '';
-  if (isShell && input.exit_code !== null && input.exit_code !== undefined) {
-    code = `<span class="code ${input.exit_code === 0 ? 'ok' : 'bad'}">exit ${input.exit_code}</span>`;
-  }
+  const wrap = document.createElement('div');
+  wrap.className = 'tool-wrap';
 
-  card.innerHTML = `<div class="head">
-      <span class="ic">${isShell ? '$' : '&rsaquo;'}</span><span class="name">${esc(name || 'tool')}</span>${code}
-      <span class="arg">${esc(String(summary).replace(/\s+/g, ' ').slice(0, 72))}</span>
-    </div>
-    <pre>${esc(body)}</pre>`;
-  $('.head', card).onclick = () => card.classList.toggle('collapsed');
-  return card;
+  const el = document.createElement('div');
+  el.className = 'tool';
+  el.innerHTML = `<span class="chev">›</span>
+    <span class="ic">${TOOL_ICON[name] || '▸'}</span>
+    <span class="lbl">${esc(label)}</span>
+    <span class="nm">${esc(detail)}</span>${exit === null ? '' : `<span class="tail ${exit === 0 ? 'code-ok' : 'code-bad'}">${exit === 0 ? 'ok' : 'exit ' + exit}</span>`}`;
+
+  const pre = document.createElement('div');
+  pre.className = 'tool-body';
+  pre.textContent = body;
+
+  el.onclick = () => wrap.classList.toggle('open');
+  wrap.append(el, pre);
+  return wrap;
+}
+
+function oneLine(s, n) {
+  const t = String(s).replace(/\s+/g, ' ').trim();
+  return t.length > n ? t.slice(0, n) + '…' : t;
+}
+
+/** A shell command as one short readable phrase: unwrap `sh -lc "…"`, keep the first line. */
+function prettyCmd(cmd) {
+  let c = String(cmd).trim();
+  const wrapped = c.replace(/^(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+(["'])?/, '');
+  if (wrapped !== c) {
+    c = wrapped.replace(/["']$/, '');
+  }
+  const first = c.split('\n').map(l => l.trim()).find(Boolean) || c;
+  return oneLine(first, 52);
+}
+
+function bubbleNode(text) {
+  const el = document.createElement('div');
+  el.className = 'bubble';
+  const lines = String(text).split('\n').length;
+  el.innerHTML = `<div class="body">${esc(text)}</div>`;
+  if (lines > 6) {
+    el.classList.add('clamped');
+    const btn = document.createElement('button');
+    btn.className = 'more';
+    btn.innerHTML = `Show more (${lines} lines) <span class="arw">▾</span>`;
+    btn.onclick = () => {
+      const clamped = el.classList.toggle('clamped');
+      btn.innerHTML = clamped
+        ? `Show more (${lines} lines) <span class="arw">▾</span>`
+        : 'Show less <span class="arw">▴</span>';
+    };
+    el.appendChild(btn);
+  }
+  return el;
 }
 
 function addMessage(role, msg) {
-  const empty = $('#empty-state');
-  if (empty) empty.remove();
-
-  const agent = msg.agent || (role === 'user' ? 'you' : state.agent);
-  const label = AGENT_LABEL[agent] || agent;
-
+  hideEmpty();
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + role;
-  wrap.innerHTML = `<div class="avatar">${role === 'user' ? 'YOU' : 'AG'}</div>
-    <div class="body"><div class="who">${esc(label)}</div><div class="content"></div></div>`;
-
-  const content = $('.content', wrap);
 
   if (role === 'user') {
-    const t = document.createElement('div');
-    t.className = 'text';
-    t.textContent = msg.content || '';
-    content.appendChild(t);
-  } else if (Array.isArray(msg.parts) && msg.parts.length) {
-    for (const p of msg.parts) {
-      if (p.type === 'tool') content.appendChild(toolCard(p.name, p.input));
-      else {
+    wrap.appendChild(bubbleNode(msg.content || ''));
+  } else {
+    const answer = document.createElement('div');
+    answer.className = 'answer';
+    const parts = Array.isArray(msg.parts) && msg.parts.length
+      ? msg.parts
+      : [{ type: 'text', text: msg.content || '' }];
+
+    parts.forEach((p, i) => {
+      if (p.type === 'tool') {
+        answer.appendChild(toolBlock(p.name, p.input));
+      } else if (p.type === 'think') {
+        answer.appendChild(thinkBlock(p.text));
+      } else {
         const t = document.createElement('div');
         t.className = 'text';
         t.innerHTML = md(p.text || '');
-        content.appendChild(t);
+        if (i === parts.length - 1) t.classList.add('cursor-off');
+        answer.appendChild(t);
       }
-    }
-  } else {
-    const t = document.createElement('div');
-    t.className = 'text';
-    t.innerHTML = md(msg.content || '');
-    content.appendChild(t);
+    });
+    wrap.appendChild(answer);
   }
 
   $('#messages').appendChild(wrap);
@@ -325,30 +386,33 @@ function addMessage(role, msg) {
 
 function scrollDown(force = false) {
   const box = $('#messages');
-  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
-  if (force || nearBottom) box.scrollTop = box.scrollHeight;
+  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 160;
+  if (force || near) box.scrollTop = box.scrollHeight;
 }
 
-/* a streaming assistant bubble: text + inline tool cards */
-function beginStream(agent) {
-  const empty = $('#empty-state');
-  if (empty) empty.remove();
-
-  const label = AGENT_LABEL[agent] || agent;
+/* ── streaming bubble ────────────────────────────────────────────────── */
+function streamBubble(agent) {
+  hideEmpty();
   const wrap = document.createElement('div');
   wrap.className = 'msg assistant';
-  wrap.innerHTML = `<div class="avatar">AG</div>
-    <div class="body"><div class="who">${esc(label)}</div><div class="content"></div></div>`;
+  const answer = document.createElement('div');
+  answer.className = 'answer';
+  wrap.appendChild(answer);
+
+  const working = document.createElement('div');
+  working.className = 'working';
+  working.innerHTML = `<span class="spin">✳</span><span>Accomplishing…</span>`;
+  wrap.appendChild(working);
+
   $('#messages').appendChild(wrap);
 
-  const content = $('.content', wrap);
   let buffer = '';
   let textEl = null;
 
   const newText = () => {
     textEl = document.createElement('div');
     textEl.className = 'text cursor';
-    content.appendChild(textEl);
+    answer.appendChild(textEl);
     buffer = '';
     return textEl;
   };
@@ -362,43 +426,49 @@ function beginStream(agent) {
       textEl.innerHTML = md(buffer);
       scrollDown();
     },
+    think(text) {
+      textEl.classList.remove('cursor');
+      const t = thinkBlock(text, false);
+      answer.appendChild(t);
+      newText();
+      scrollDown();
+    },
     tool(name, input) {
       textEl.classList.remove('cursor');
-      content.appendChild(toolCard(name, input));
+      answer.appendChild(toolBlock(name, input));
       newText();
       scrollDown();
     },
     end(err) {
+      working.remove();
       textEl.classList.remove('cursor');
       if (err && !buffer.trim()) {
-        textEl.innerHTML = `<span style="color:var(--red)">${esc(err)}</span>`;
+        textEl.innerHTML = `<span style="color:var(--danger)">${esc(err)}</span>`;
       }
-      if (!content.textContent.trim()) {
-        textEl.innerHTML = '<span style="color:var(--dimmer)">(no output)</span>';
+      if (!answer.textContent.trim()) {
+        textEl.innerHTML = '<span style="color:var(--faint)">(no output)</span>';
       }
       scrollDown();
     },
-    get text() { return content.textContent; },
   };
 }
 
-/* ── SSE reader (EventSource, one shot) ──────────────────────────────── */
+/* ── SSE ─────────────────────────────────────────────────────────────── */
 function streamRun(runId, onEvent) {
   return new Promise((resolve, reject) => {
     const es = new EventSource('/api/stream/' + runId);
     const finish = (fn, arg) => { es.close(); fn(arg); };
 
-    ['message', 'tool', 'done'].forEach(kind => {
+    ['message', 'tool', 'think', 'done'].forEach(kind => {
       es.addEventListener(kind, ev => {
         let payload = ev.data;
-        try { payload = JSON.parse(ev.data); } catch { /* plain string */ }
+        try { payload = JSON.parse(ev.data); } catch { /* plain */ }
         if (kind === 'done') return finish(resolve, payload || {});
         onEvent(kind, payload);
       });
     });
 
     es.onerror = () => {
-      // EventSource retries; if the server already ended the stream this fires once.
       if (es.readyState === EventSource.CLOSED) finish(reject, new Error('stream closed'));
       else if (state.run !== runId) finish(reject, new Error('stream ended'));
     };
@@ -408,56 +478,53 @@ function streamRun(runId, onEvent) {
 /* ── chat ────────────────────────────────────────────────────────────── */
 async function sendChat() {
   if (state.run) return;
-
   const input = $('#prompt');
   const prompt = input.value.trim();
   if (!prompt) return;
 
   input.value = '';
   autosize(input);
-  $('#prompt').disabled = true;
+  input.disabled = true;
   $('#send').classList.add('hidden');
   $('#stop').classList.remove('hidden');
 
   if (!state.session) {
     try {
       const s = await api('/api/session/new', {
-        method: 'POST',
-        body: JSON.stringify({ agent: state.agent }),
+        method: 'POST', body: JSON.stringify({ agent: state.agent }),
       });
       state.session = s.id;
-      $('#session-title').textContent = s.title || 'New session';
+      setTitle('New chat');
       $('#messages').innerHTML = '';
       await refreshSessions();
-    } catch (e) {
-      statusError('cannot create session');
+    } catch {
+      statusError('cannot create chat');
       resetComposer();
       return;
     }
   }
 
-  addMessage('user', prompt, 'you');
-  const bubble = beginStream(state.agent);
-  statusRunning(`${state.agent} working`);
+  addMessage('user', { content: prompt });
+  const bubble = streamBubble(state.agent);
+  statusRunning(`${AGENT_LABEL[state.agent] || state.agent} working`);
 
   try {
     const start = await api('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ agent: state.agent, prompt, session: state.session }),
+      body: JSON.stringify({
+        agent: state.agent, prompt, session: state.session, auto: state.auto,
+      }),
     });
     state.run = start.run;
 
     await streamRun(start.run, (kind, payload) => {
       if (kind === 'message') bubble.push(String(payload));
       else if (kind === 'tool') bubble.tool(payload.name, payload.input);
+      else if (kind === 'think') bubble.think(String(payload));
     });
 
-    // the session title may have been set from the first prompt
     const s = await api('/api/session/' + state.session).catch(() => null);
-    if (s) {
-      $('#session-title').textContent = s.title || 'Session';
-      document.title = `${s.title} — AntiGem`;
-    }
+    if (s) setTitle(s.title || 'Chat');
     bubble.end();
     statusDone('done');
     refreshSessions();
@@ -497,6 +564,22 @@ function termWrite(text, cls) {
   out.scrollTop = out.scrollHeight;
 }
 
+async function loadTermHistory() {
+  const out = termOut();
+  out.innerHTML = '';
+  termWrite(`AntiGem ${state.info?.version || ''} · ${state.info?.workspace || ''}\n`, 'sys');
+  termWrite('commands run in the portable workspace with the portable HOME\n\n', 'sys');
+  try {
+    const d = await api('/api/term/history');
+    for (const it of d.items || []) {
+      termWrite('$ ' + it.cmd + '\n', 'cmd');
+      termWrite(it.out || '');
+      if (it.code) termWrite(`exit ${it.code}\n`, 'err');
+      termWrite('\n');
+    }
+  } catch { /* first run */ }
+}
+
 async function runCommand() {
   if (state.run) return;
   const input = $('#cmd');
@@ -532,8 +615,6 @@ async function loadDir(path) {
     const d = await api('/api/files?path=' + encodeURIComponent(path));
     state.treePath = d.path || '.';
     $('#tree-path').textContent = state.treePath;
-    $('#tree-path').title = state.treePath;
-
     const box = $('#tree-items');
     box.innerHTML = '';
     if (!d.items || !d.items.length) {
@@ -542,27 +623,25 @@ async function loadDir(path) {
     }
     for (const it of d.items) {
       const el = document.createElement('div');
-      el.className = 'entry' + (it.name === state.file.path ? ' on' : '');
-      const size = it.dir ? '' : human(it.size);
+      el.className = 'entry';
       el.innerHTML = `<span class="ic">${it.dir ? '▸' : '·'}</span>
                       <span class="nm">${esc(it.name)}</span>
-                      <span class="sz">${size}</span>`;
+                      <span class="sz">${it.dir ? '' : human(it.size)}</span>`;
       el.onclick = () => {
         const next = state.treePath === '.' ? it.name : `${state.treePath}/${it.name}`;
-        if (it.dir) loadDir(next);
-        else openFile(next);
+        if (it.dir) loadDir(next); else openFile(next);
       };
       box.appendChild(el);
     }
   } catch (e) {
-    $('#tree-items').innerHTML = `<div class="entry" style="cursor:default;color:var(--red)">${esc(e.message)}</div>`;
+    $('#tree-items').innerHTML = `<div class="entry" style="cursor:default;color:var(--danger)">${esc(e.message)}</div>`;
   }
 }
 
 function human(n) {
   if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' K';
-  return (n / 1024 / 1024).toFixed(1) + ' M';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' K';
+  return (n / 1048576).toFixed(1) + ' M';
 }
 
 async function openFile(path) {
@@ -570,13 +649,15 @@ async function openFile(path) {
     const d = await api('/api/file?path=' + encodeURIComponent(path));
     state.file = { path: d.path, original: d.content };
     $('#file-path').textContent = d.path;
-    $('#file-path').title = d.path;
     $('#file-body').value = d.content;
     $('#file-body').readOnly = false;
     $('#dirty').classList.add('hidden');
     $('#save').classList.add('hidden');
     const lines = d.content.split('\n').length;
     $('#file-meta').textContent = `${lines} lines · ${human(d.content.length)}`;
+    if (matchMedia('(max-width: 1023px)').matches) {
+      $('.files-wrap').classList.add('file-open');
+    }
     $$('.entry').forEach(e => {
       const nm = $('.nm', e);
       e.classList.toggle('on', nm && nm.textContent === d.path.split('/').pop());
@@ -600,49 +681,43 @@ async function saveFile() {
     $('#dirty').classList.add('hidden');
     $('#save').classList.add('hidden');
     statusDone('saved');
-  } catch (e) {
-    statusError('save failed');
-  }
+  } catch { statusError('save failed'); }
 }
 
-/* ── tabs ────────────────────────────────────────────────────────────── */
-function setTab(tab) {
-  state.tab = tab;
-  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  $$('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
-  if (tab === 'files' && !$('#tree-items').children.length) loadDir(state.treePath);
-  if (tab === 'terminal' && !termOut().children.length) loadTermHistory();
-  if (tab === 'chat') $('#prompt').focus();
-  if (tab === 'terminal') $('#cmd').focus();
+/* ── views / drawer ──────────────────────────────────────────────────── */
+function setView(view) {
+  state.view = view;
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
+
+  const names = { chat: state.chatTitle || 'New chat', files: 'Files', terminal: 'Terminal' };
+  $('#title').textContent = names[view] || 'AntiGem';
+  document.title = `${names[view] || 'AntiGem'} — AntiGem`;
+
+  if (view === 'terminal' && !termOut().children.length) loadTermHistory();
+  if (view === 'files' && !$('#tree-items').children.length) loadDir(state.treePath);
+  if (view === 'chat') $('#prompt').focus();
+  if (view === 'terminal') $('#cmd').focus();
 }
 
-async function loadTermHistory() {
-  const out = termOut();
-  out.innerHTML = '';
-  termWrite(`AntiGem portable ${state.info?.version || ''} — ${state.info?.workspace || ''}\n`, 'sys');
-  termWrite('commands run in the portable workspace with the portable HOME.\n\n', 'sys');
-  try {
-    const d = await api('/api/term/history');
-    for (const it of d.items || []) {
-      termWrite('$ ' + it.cmd + '\n', 'cmd');
-      termWrite(it.out || '');
-      if (it.code) termWrite(`exit ${it.code}\n`, 'err');
-      termWrite('\n');
-    }
-  } catch { /* first load */ }
+function openDrawer() { document.body.classList.add('nav-open'); }
+function closeDrawer() { document.body.classList.remove('nav-open'); }
+function toggleDrawer() {
+  document.body.classList.toggle('nav-open');
 }
 
-function closeNav() { document.body.classList.remove('nav-open'); }
-
-/* ── textarea behaviour ──────────────────────────────────────────────── */
+/* ── textarea ────────────────────────────────────────────────────────── */
 function autosize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 180) + 'px';
 }
 
 /* ── wiring ──────────────────────────────────────────────────────────── */
-function bindUI() {
-  $$('.tab').forEach(t => t.onclick = () => setTab(t.dataset.tab));
+function wire() {
+  $('#menu-btn').onclick = toggleDrawer;
+  $('#drawer-close').onclick = closeDrawer;
+  $('#scrim').onclick = closeDrawer;
+
+  $('#proj-chip').onclick = openDrawer;
 
   $('#send').onclick = sendChat;
   $('#stop').onclick = cancelRun;
@@ -657,46 +732,40 @@ function bindUI() {
     if (e.key === 'Enter') { e.preventDefault(); runCommand(); }
   });
 
-  $('#agent').onchange = e => {
-    state.agent = e.target.value;
-    renderAgents();
-  };
-
   $('#new-session').onclick = async () => {
     if (state.run) return;
     try {
       const s = await api('/api/session/new', {
-        method: 'POST',
-        body: JSON.stringify({ agent: state.agent }),
+        method: 'POST', body: JSON.stringify({ agent: state.agent }),
       });
       state.session = s.id;
-      $('#session-title').textContent = 'New session';
-      $('#messages').innerHTML = '';
-      $('#messages').appendChild(emptyState());
+      setTitle('New chat');
+      showEmpty();
       await refreshSessions();
-      setTab('chat');
-      closeNav();
+      setView('chat');
+      closeDrawer();
       $('#prompt').focus();
-    } catch (e) { statusError('cannot create session'); }
+    } catch { statusError('cannot create chat'); }
   };
 
-  $('#clear').onclick = () => {
-    if (state.tab === 'terminal') { termOut().innerHTML = ''; return; }
-    if (state.tab === 'chat') {
-      $('#messages').innerHTML = '';
-      $('#messages').appendChild(emptyState());
-    }
+  $('#open-chat').onclick = () => { setView('chat'); closeDrawer(); };
+  $('#open-term').onclick = () => { setView('terminal'); closeDrawer(); };
+  $('#open-files').onclick = () => { setView('files'); closeDrawer(); };
+  $('#attach-btn').onclick = () => { setView('files'); };
+  $('#back-files').onclick = () => {
+    $('.files-wrap').classList.remove('file-open');
   };
 
-  $('#open-sidebar').onclick = () => {
-    if (window.matchMedia('(max-width: 820px)').matches) document.body.classList.add('nav-open');
-    else document.body.classList.remove('nav-collapsed');
+  // chips: only "Auto" is a real switch; the rest are the app's readouts
+  const auto = $$('.chip')[0];
+  auto.onclick = () => {
+    state.auto = !state.auto;
+    auto.classList.toggle('on', state.auto);
+    auto.title = state.auto
+      ? 'Agents may use tools without asking'
+      : 'Agents run read-only';
   };
-  $('#toggle-sidebar').onclick = () => document.body.classList.toggle('nav-collapsed');
-  document.addEventListener('click', e => {
-    if (document.body.classList.contains('nav-open') &&
-        !e.target.closest('#sidebar') && !e.target.closest('#open-sidebar')) closeNav();
-  });
+  auto.title = 'Agents may use tools without asking';
 
   $('#reload-files').onclick = () => loadDir(state.treePath);
   $('#up').onclick = () => {
@@ -717,11 +786,32 @@ function bindUI() {
   });
 
   document.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-      e.preventDefault(); setTab('chat'); $('#prompt').focus();
-    }
-    if (e.key === 'Escape') closeNav();
+    if (e.key === 'Escape') closeDrawer();
   });
+
+  // desktop: the rail is permanent, so no scrim / drawer state
+  matchMedia('(min-width: 1024px)').addEventListener('change', () => closeDrawer());
+}
+
+function hashView() {
+  return decodeURIComponent(location.hash.slice(1)).split(':')[0];
+}
+
+function hashSession() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  return h.startsWith('chat:') ? h.slice(5) : '';
+}
+
+function applyHash() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (!h) return;
+  const [view, arg] = h.split(':');
+  if (view === 'files') {
+    setView('files');
+    if (arg) setTimeout(() => openFile(arg), 150);
+  } else if (view === 'terminal') {
+    setView('terminal');
+  }
 }
 
 boot();
