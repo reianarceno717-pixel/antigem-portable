@@ -133,6 +133,19 @@ engines
   opencode  ready (proot) …/.opencode/bin/opencode     (v2.2.7, Ubuntu 24.04.5 sandbox)
 ```
 
+## Tests
+
+Headless acceptance suite — runs on Termux, Linux, macOS:
+
+```sh
+./tests/smoke.sh          # full (includes a real Node download + checksum)
+./tests/smoke.sh --quick  # skip the download test
+```
+
+Covers: file/exec/syntax integrity, every launcher command, HOME isolation, the glibc
+sandbox, a **fresh clone of the published repo**, the laptop Node bootstrap (download →
+SHASUMS256 verify → layout), and static checks on the PowerShell entry point.
+
 ## Security notes
 
 * `data/home` holds real credentials after `--import`. Treat the folder like a keychain —
